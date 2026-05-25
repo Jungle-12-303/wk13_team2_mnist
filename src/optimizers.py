@@ -45,6 +45,10 @@ class Adam:
 
         for key in params:
             if key not in self.m:
+                # np.zeros_like(params[key])
+                # - 입력: 현재 파라미터 배열
+                # - 처리: 같은 shape/dtype을 가진 0 배열 생성
+                # - 출력: Adam 이동평균을 저장할 배열
                 self.m[key] = np.zeros_like(params[key])
                 self.v[key] = np.zeros_like(params[key])
 
@@ -55,4 +59,8 @@ class Adam:
             # 학습 초반에는 이동평균이 0 쪽으로 치우치므로 bias correction을 적용합니다.
             m_hat = self.m[key] / (1 - self.beta1**self.t)
             v_hat = self.v[key] / (1 - self.beta2**self.t)
+            # np.sqrt(v_hat)
+            # - 입력: gradient 제곱 이동평균 배열
+            # - 처리: 각 원소의 제곱근을 계산
+            # - 출력: 파라미터별 업데이트 크기 조절에 쓰는 배열
             params[key] -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)

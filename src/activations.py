@@ -20,8 +20,15 @@ class ReLU:
         Returns:
             x와 같은 shape의 배열. 양수는 그대로, 0 이하 값은 0입니다.
         """
+        # x > 0은 x와 같은 shape의 bool 배열을 만듭니다.
+        # 예: [[-1, 2]] -> [[False, True]]
         # mask는 "이 위치로 gradient가 지나갈 수 있는가?"를 기억하는 표입니다.
         self.mask = x > 0
+        # np.where(condition, a, b)
+        # - condition: bool 배열
+        # - a: condition이 True인 위치에 넣을 값
+        # - b: condition이 False인 위치에 넣을 값
+        # - 출력: condition과 같은 shape의 배열
         return np.where(self.mask, x, 0)
 
     def backward(self, dout):
@@ -52,8 +59,20 @@ class Softmax:
         Returns:
             (batch_size, num_classes) 확률 배열. 각 row의 합은 1입니다.
         """
+        # np.max(x, axis=1, keepdims=True)
+        # - 입력: (batch_size, num_classes) 배열 x
+        # - 처리: 각 row(샘플)에서 가장 큰 logit을 찾음
+        # - 출력: keepdims=True라서 (batch_size, 1) shape 유지
         shifted = x - np.max(x, axis=1, keepdims=True)
+        # np.exp(shifted)
+        # - 입력: shifted와 같은 shape의 배열
+        # - 처리: 각 원소에 자연상수 e의 거듭제곱을 적용
+        # - 출력: shifted와 같은 shape의 양수 배열
         exp_x = np.exp(shifted)
+        # np.sum(exp_x, axis=1, keepdims=True)
+        # - 입력: (batch_size, num_classes) 배열
+        # - 처리: 각 row의 클래스 점수 합계를 구함
+        # - 출력: (batch_size, 1) 배열. 나누기 때 row별로 broadcast됩니다.
         self.out = exp_x / np.sum(exp_x, axis=1, keepdims=True)
         return self.out
 

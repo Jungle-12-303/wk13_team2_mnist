@@ -38,6 +38,10 @@ class Affine:
             dx: (batch_size, input_dim), 앞쪽 layer로 보낼 gradient
         """
         self.dW = self.x.T @ dout
+        # np.sum(dout, axis=0)
+        # - 입력: (batch_size, output_dim) gradient
+        # - 처리: batch 방향을 모두 더해 bias 하나당 gradient를 구함
+        # - 출력: (output_dim,) 배열
         self.db = np.sum(dout, axis=0)
         dx = dout @ self.W.T
         return dx
@@ -61,6 +65,10 @@ class BatchNorm:
         self.gamma = gamma
         self.beta = beta
         self.momentum = momentum
+        # np.zeros_like(beta)
+        # - 입력: 기준 배열 beta
+        # - 처리: beta와 같은 shape/dtype을 가진 0 배열을 만듦
+        # - 출력: beta와 shape이 같은 0 배열
         self.running_mean = np.zeros_like(beta)
         self.running_var = np.zeros_like(beta)
         self.eps = 1e-7
@@ -75,10 +83,22 @@ class BatchNorm:
             x와 같은 shape의 정규화된 출력
         """
         if train:
+            # np.mean(x, axis=0)
+            # - 입력: (batch_size, feature_dim) 배열
+            # - 처리: batch 방향 평균을 구해 feature별 평균을 계산
+            # - 출력: (feature_dim,) 배열
             batch_mean = np.mean(x, axis=0)
+            # np.var(x, axis=0)
+            # - 입력: (batch_size, feature_dim) 배열
+            # - 처리: batch 방향 분산을 구해 feature별 분산을 계산
+            # - 출력: (feature_dim,) 배열
             batch_var = np.var(x, axis=0)
 
             self.x_centered = x - batch_mean
+            # np.sqrt(...)
+            # - 입력: 분산 + eps 배열
+            # - 처리: 각 원소의 제곱근을 계산해 표준편차로 바꿈
+            # - 출력: 입력과 같은 shape의 배열
             self.std = np.sqrt(batch_var + self.eps)
             self.x_norm = self.x_centered / self.std
 
@@ -91,6 +111,7 @@ class BatchNorm:
         else:
             # 추론 때는 batch 하나에 흔들리지 않도록 학습 중 누적한 통계를 씁니다.
             self.x_centered = x - self.running_mean
+            # np.sqrt는 running variance를 표준편차로 바꾸는 데 사용합니다.
             self.std = np.sqrt(self.running_var + self.eps)
             self.x_norm = self.x_centered / self.std
 
@@ -108,6 +129,7 @@ class BatchNorm:
         """
         batch_size = dout.shape[0]
 
+        # np.sum(..., axis=0)은 batch 안의 gradient를 feature별로 합칩니다.
         self.dbeta = np.sum(dout, axis=0)
         self.dgamma = np.sum(dout * self.x_norm, axis=0)
 
@@ -145,7 +167,11 @@ class Dropout:
             train: True면 random mask 적용, False면 평균 출력 크기로 scale
         """
         if train:
-            # True인 위치만 살아남습니다. backward에서도 같은 mask를 사용합니다.
+            # np.random.rand(*x.shape)
+            # - 입력: 만들고 싶은 차원 크기들. *x.shape은 x의 shape을 풀어서 전달합니다.
+            # - 처리: 0 이상 1 미만의 균등분포 난수를 생성
+            # - 출력: x와 같은 shape의 난수 배열
+            # drop_ratio보다 큰 위치만 True가 되어 살아남습니다.
             self.mask = np.random.rand(*x.shape) > self.drop_ratio
             return x * self.mask
 

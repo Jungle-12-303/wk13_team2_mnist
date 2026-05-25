@@ -38,13 +38,29 @@ class NeuralNetwork:
         for idx in range(1, len(layer_sizes)):
             input_dim = layer_sizes[idx - 1]
             output_dim = layer_sizes[idx]
+            # np.random.randn(input_dim, output_dim)
+            # - 입력: 만들 배열의 shape
+            # - 처리: 평균 0, 표준편차 1인 정규분포 난수를 생성
+            # - 출력: (input_dim, output_dim) weight 배열
+            #
+            # np.sqrt(2.0 / input_dim)
+            # - 입력: 숫자 하나
+            # - 처리: 제곱근을 계산
+            # - 출력: weight scale로 쓸 scalar
             self.params[f"W{idx}"] = (
                 np.random.randn(input_dim, output_dim) * np.sqrt(2.0 / input_dim)
             )
+            # np.zeros(output_dim)
+            # - 입력: 만들 배열 길이
+            # - 처리: 모든 값이 0인 배열 생성
+            # - 출력: (output_dim,) bias 배열
             self.params[f"b{idx}"] = np.zeros(output_dim)
 
             if self.use_batchnorm and idx < len(layer_sizes) - 1:
+                # np.ones(output_dim)은 모든 값이 1인 (output_dim,) 배열을 만듭니다.
+                # BatchNorm의 gamma는 처음에 값을 그대로 통과시키기 위해 1로 둡니다.
                 self.params[f"gamma{idx}"] = np.ones(output_dim)
+                # beta는 처음에 shift를 주지 않기 위해 0으로 둡니다.
                 self.params[f"beta{idx}"] = np.zeros(output_dim)
 
         self.layers = OrderedDict()
@@ -64,6 +80,7 @@ class NeuralNetwork:
                     self.layers[f"Dropout{idx}"] = Dropout(dropout_ratio)
 
         self.softmax = Softmax()
+        # np.zeros_like(value)는 각 파라미터와 같은 shape의 gradient 저장 공간을 만듭니다.
         self.grads = {key: np.zeros_like(value) for key, value in self.params.items()}
 
     def forward(self, x, train=True):
