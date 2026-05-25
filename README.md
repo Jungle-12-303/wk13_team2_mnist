@@ -1,156 +1,107 @@
-# 과제 - 신경망을 이용한 손글씨 숫자 인식
+# MNIST NumPy MLP 실험
 
-## 1. 개요
+PyTorch나 TensorFlow 없이 NumPy만 사용해서 MNIST 손글씨 숫자 분류 모델을 구현하고, 여러 모델 조합을 실험하는 프로젝트입니다.
 
-본 과제는 **PyTorch, TensorFlow 등 외부 딥러닝 프레임워크를 사용하지 않고**, `NumPy`만으로 신경망의 핵심 구성 요소를 직접 구현하는 것을 목표로 합니다.
+이번 실험의 목표는 기존 구성 요소에 Sigmoid 활성화 함수를 추가한 뒤, 모델 구조와 학습 설정을 바꿔 보면서 test accuracy 95% 이상, 가능하면 97% 이상을 달성하는 것입니다.
 
-- **최종 목표**: MNIST 필기체 숫자 분류기 구현, **테스트 정확도 97% 이상** (최소 95% 이상)
-- **참고 도서**: 『밑바닥부터 시작하는 딥러닝』 1~6장
+## 실행 파일
 
----
+- `mnist_lab.ipynb`: 데이터 로드, 단일 학습, 여러 실험 실행, 결과표와 그래프 출력
+- `src/network.py`: Affine, BatchNorm, Activation, Dropout을 조합하는 MLP 모델
+- `src/activations.py`: ReLU, LeakyReLU, Sigmoid, Tanh, Softmax
+- `src/layers.py`: Affine, BatchNorm, Dropout
+- `src/losses.py`: Softmax, Cross Entropy, Softmax+Cross Entropy gradient
+- `src/optimizers.py`: SGD, Momentum, Adam
+- `src/training.py`: 학습 루프, 평가, 실험 실행, 결과 저장, loss curve 비교
+- `data/mnist.npz`: MNIST 데이터 파일
 
-## 2. 환경 설정
+## 학습 루프 규칙
 
-### 2.1 요구 사항
+모든 실험은 `training.train()` 함수의 미니배치 학습 루프를 사용합니다. 각 미니배치에서는 아래 순서를 지킵니다.
 
-- **Python 3.11** (로컬 Conda 환경은 3.11로 통일)
-- **허용 라이브러리**: `numpy`, `math`, `random`, `time`, `matplotlib`(시각화)
-- **금지**: 허용 라이브러리 이외의 모든 라이브러리
+1. Forward: `model.forward(x_batch, train=True)`
+2. Loss: `cross_entropy_loss(y_pred, y_batch)`
+3. Backward: `softmax_cross_entropy_gradient(y_pred, y_batch)` 계산 후 `model.backward(dout)`
+4. Update: `optimizer.update(model.params, model.grads)`
 
-### **2.2 Colab에서 사용할 때 (권장)**
+테스트와 평가 단계에서는 `evaluate()`가 `model.predict()`를 호출하고, 내부적으로 `train=False`로 forward를 실행합니다. 따라서 Dropout은 꺼지고 BatchNorm은 학습 중 저장된 running mean과 running variance를 사용합니다.
 
-1. 먼저 과제 템플릿을 본인 팀 저장소에 업로드합니다.
-2. 브라우저에서 아래 주소로 이동해 노트북을 엽니다. `USERNAME`, 저장소명, 브랜치명은 본인 또는 팀 환경에 맞게 바꿉니다. (브랜치가 `main`이면 URL의 `master`를 `main`으로 변경)
-  ```python
-    https://colab.research.google.com/github/USERNAME/mnist-lab/blob/master/mnist_lab.ipynb
-  ```
-3. **런타임 설정**: 상단 메뉴 **런타임 → 런타임 유형 변경**에서 **Python 3**, CPU 또는 GPU를 선택합니다.
-4. **첫 셀 실행**: 노트북 맨 위의 **「1. 환경설정」** 코드 셀을 먼저 실행합니다.
+Softmax와 Cross Entropy는 수치 안정성을 위해 max-shift와 epsilon clipping을 적용합니다. 첫 번째 미니배치에서는 파라미터와 gradient shape가 같은지도 확인합니다.
 
-- **Colab에서만** 다음 두 가지를 입력합니다.
-  - **GitHub 저장소 URL** (예: `github.com/USERNAME/mnist-lab.git`)
-  - **GitHub Personal Access Token** (private 저장소인 경우)
+## 실험 구성
 
-5. 그 다음 셀부터 순서대로 실행하여 학습·평가를 진행합니다.
+노트북의 **10. Multi Experiment Suite** 구역에서 여러 실험을 따로 실행할 수 있습니다. `SELECTED_GROUP` 값만 바꾸면 원하는 실험군을 선택할 수 있습니다.
 
-### 2.3 로컬에서 실행할 때 (Conda)
+```python
+SELECTED_GROUP = "quick"
+```
 
-로컬에서는 **Conda**로 환경을 만들고 실행합니다. **Mac**은 **Miniforge**, **Windows**는 **Anaconda**를 사용하며, **Python 3.11**로 통일합니다.
+선택 가능한 실험군은 다음과 같습니다.
 
-#### Mac (Apple Silicon) — Miniforge
+| 실험군 | 내용 |
+| --- | --- |
+| `quick` | ReLU와 Sigmoid 모델을 짧게 실행해서 전체 코드 흐름 확인 |
+| `architecture` | 은닉층 수와 차원 변경: `[256, 128]`, `[512, 256, 128]`, `[1024, 512]` 등 |
+| `dropout` | Dropout 비율 `0.0`, `0.1`, `0.2`, `0.5` 비교 |
+| `learning_rate` | learning rate `0.0005`, `0.001`, `0.002`, learning rate decay 비교 |
+| `batchnorm` | BatchNorm 적용 전후를 ReLU와 Sigmoid에서 비교 |
+| `full` | 위 실험을 모두 실행 |
 
-1. **Miniforge 설치** (Apple Silicon용, conda-forge 채널 기본)
-  - 다운로드: [Miniforge - GitHub](https://github.com/conda-forge/miniforge#miniforge3)
-  - Apple Silicon: `Miniforge3-macOS-arm64` 설치 파일 사용
-  - 설치 후 Conda 위치(기본): `~/miniforge3` (홈 디렉터리 아래)
-2. **터미널에서**:
+Sigmoid 모델은 은닉층 activation을 `"sigmoid"`로 설정하고, 초기화는 Sigmoid에 더 잘 맞는 `"xavier"`를 사용하도록 구성했습니다. ReLU 모델은 `"he"` 초기화를 기본으로 사용합니다.
+
+## 기록 항목
+
+각 실험은 다음 항목을 결과로 저장합니다.
+
+| 항목 | 설명 |
+| --- | --- |
+| 모델 구조 | `architecture`, 은닉층 수, 각 층 차원, activation |
+| 학습 설정 | optimizer, learning rate, epochs, batch size |
+| 정규화/규제 | BatchNorm 사용 여부, Dropout 비율 |
+| 초기화 | He, Xavier 등 |
+| 결과 | train loss, train accuracy, test accuracy, 파라미터 수 |
+| 시간 | 학습에 걸린 시간 `time_sec` |
+
+실험 실행 후 결과는 아래 파일로 저장됩니다.
+
+- `results_<실험군>.csv`
+- `results_<실험군>.json`
+
+예를 들어 `SELECTED_GROUP = "dropout"`으로 실행하면 `results_dropout.csv`, `results_dropout.json`이 생성됩니다.
+
+## 그래프
+
+노트북의 시각화 셀은 결과를 보기 좋게 비교할 수 있도록 다음 그래프를 출력하고 `figures/` 폴더에 PNG로 저장합니다.
+
+- epoch별 loss curve
+- 실험별 test accuracy bar chart
+- learning rate 변경에 따른 accuracy 비교
+- Dropout 적용 전후 및 비율별 accuracy 비교
+
+보고서에는 노트북 출력 화면을 캡처하거나 `figures/`에 저장된 PNG 파일을 첨부하면 됩니다.
+
+## 실행 순서
+
+1. `mnist_lab.ipynb`를 엽니다.
+2. 환경 설정 셀을 실행합니다.
+3. 데이터 로드 셀을 실행합니다.
+4. 단일 모델 학습을 먼저 실행해 기본 동작을 확인합니다.
+5. **10. Multi Experiment Suite**에서 `SELECTED_GROUP`을 선택합니다.
+6. 실험 실행 셀을 실행합니다.
+7. 결과표와 그래프 셀을 실행합니다.
+
+빠르게 확인할 때는 `quick`을 먼저 실행하고, 최종 비교용으로는 `architecture`, `dropout`, `learning_rate`, `batchnorm` 또는 `full`을 실행하면 됩니다.
+
+## Colab 또는 로컬 실행
+
+필요 패키지는 `requirements.txt`로 설치합니다.
 
 ```bash
-# 저장소로 이동
-cd mnist-lab
-
-# Conda 환경 생성 (Python 3.11)
-conda create -n mnist-nn python=3.11 -y
-
-# 환경 활성화
-conda activate mnist-nn
-
-# 의존성 설치
 pip install -r requirements.txt
-
-# 테스트 실행 (선택)
-pytest tests/ -v
 ```
 
-- Miniforge가 PATH에 없으면: `~/miniforge3/bin/conda activate mnist-nn` 처럼 전체 경로로 실행
-
-#### Windows — Anaconda
-
-1. **Anaconda 설치**
-  - 다운로드: [Anaconda Distribution](https://www.anaconda.com/download)
-  - 설치 시 **"Add Anaconda to my PATH environment variable"** 옵션 권장 (체크 시 터미널에서 `conda` 바로 사용)
-  - 설치 후 Conda 위치(기본): `C:\Users\<사용자명>\anaconda3` 또는 `C:\ProgramData\anaconda3`
-2. **PowerShell** 또는 **명령 프롬프트(cmd)** 에서:
+로컬에서 실행할 때는 프로젝트 루트에서 Jupyter Notebook을 켠 뒤 `mnist_lab.ipynb`를 실행하면 됩니다.
 
 ```bash
-# 저장소로 이동
-cd mnist-lab
-
-# Conda 환경 생성 (Python 3.11)
-conda create -n mnist-nn python=3.11 -y
-
-# 환경 활성화
-conda activate mnist-nn
-
-# 의존성 설치
-pip install -r requirements.txt
-
-# 테스트 실행 (선택)
-pytest tests/ -v
+jupyter notebook mnist_lab.ipynb
 ```
-
-- PATH에 없으면: `C:\Users\<사용자명>\anaconda3\Scripts\conda.exe activate mnist-nn` 처럼 전체 경로로 실행
-- **환경 비활성화**: `conda deactivate`
-
-### 2.4 MNIST 데이터 (data 폴더)
-
-- MNIST 데이터는 **`data/mnist.npz`**에 두고 사용합니다.
-- **`load_mnist()`**는 이미 구현되어 있습니다.
-  - `data/mnist.npz`가 있으면 해당 파일을 로드합니다.
-  - 없으면 URL에서 다운로드한 뒤 `data/` 폴더에 저장한 후 로드합니다.
-- 데이터를 미리 받으려면 프로젝트 루트에서 **`python download_mnist.py`**를 한 번 실행하면 됩니다.
-
----
-
-## 3. 프로젝트 구조
-
-```
-mnist-lab/
-├── .gitignore                     # data/mnist.npz, __pycache__ 등 제외
-├── README.md                      # 이 파일 (과제 안내·환경)
-├── REPORT.md                      # 제출용 보고서 (형식 예시)
-├── requirements.txt               # numpy, matplotlib, pytest
-├── download_mnist.py              # MNIST를 data/에 미리 다운로드 (선택)
-├── mnist_lab.ipynb                # Colab/로컬용 노트북 (환경설정 → 데이터 로드 → 학습 → 평가)
-├── data/                          # MNIST 데이터 (mnist.npz는 load_mnist() 또는 download_mnist.py로 생성)
-├── src/
-│   ├── __init__.py
-│   ├── data.py                    # 데이터 로드
-│   ├── activations.py             # ReLU, Softmax
-│   ├── layers.py                  # Affine, BatchNorm, Dropout
-│   ├── losses.py                  # cross_entropy_loss
-│   ├── optimizers.py              # SGD, Adam
-│   ├── network.py                 # NeuralNetwork
-│   └── training.py                # train, evaluate, plot_loss_history
-└── tests/
-    ├── conftest.py                # 테스트 공통 import 경로 설정
-    ├── test_relu.py               # ReLU 테스트
-    ├── test_softmax.py            # Softmax 테스트
-    ├── test_affine.py             # Affine 테스트
-    ├── test_cross_entropy_loss.py # cross_entropy_loss 테스트
-    ├── test_sgd.py                # SGD 테스트
-    ├── test_adam.py               # Adam 테스트
-    ├── test_neural_network.py     # NeuralNetwork 테스트
-    ├── test_batchnorm.py          # BatchNorm 테스트
-    ├── test_dropout.py            # Dropout 테스트
-    ├── test_training.py           # train 테스트
-    └── test_evaluate.py           # evaluate 테스트
-```
-
-`src/`에는 Python이 import하는 구현 파일만 둡니다. `mnist_lab.ipynb`는 학생이 가장 먼저 열어 실행 순서를 따라가는 안내서이므로 프로젝트 루트에 둡니다. 테스트와 노트북은 `from activations import ReLU`, `from network import NeuralNetwork`처럼 역할별 모듈을 직접 import합니다.
-
----
-
-## 4. 제출물
-
-- **팀별 제출**: **동작하는 소스코드** + **REPORT.md**
-- **소스코드**: `src/` 아래 소스 전체를 zip으로 압축 
-- **REPORT.md** 에 다음 구성을 포함할 것 (형식 예시: 저장소의 `REPORT.md` 참고):
-  - **0. 반·팀원**: 반, 팀원 이름
-  - **1. 실험 목적**: 과제 요약 (한두 문장)
-  - **2. 모델 구조**: 입력/은닉층/출력, Affine·BatchNorm·ReLU·Dropout 구성
-  - **3. 학습 설정**: 옵티마이저, 학습률, epochs, batch_size, Dropout 비율, BatchNorm momentum, 가중치 초기화
-  - **4. 실험 환경**: Python·라이브러리, 학습 소요 시간
-  - **5. 결과**: 테스트 정확도(%), 총 파라미터 수, 손실 커브 (그래프 또는 요약)
-  - **6. 회고**: 수렴 여부, 과적합/과소적합, 구조·하이퍼파라미터 변경 시도와 결과
-
