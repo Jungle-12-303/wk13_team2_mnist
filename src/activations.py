@@ -1,70 +1,65 @@
 # -*- coding: utf-8 -*-
-"""
-활성화 함수 모음.
-
-학생 구현 대상:
-- ReLU.forward, ReLU.backward
-- Softmax.forward, Softmax.backward
-"""
+"""Activation functions used by the NumPy MNIST model."""
 
 import numpy as np
 
 
 class ReLU:
     """
-    ReLU(Rectified Linear Unit) 활성화 함수.
+    ReLU(Rectified Linear Unit).
 
-    은닉층에서 음수 값은 0으로 막고, 양수 값은 그대로 통과시킵니다.
-    forward에서 만든 mask는 backward 때 "어느 위치로 gradient를 흘릴지" 결정하는 데 사용됩니다.
+    입력값이 0보다 크면 그대로 통과시키고, 0 이하이면 0으로 바꿉니다.
+    역전파 때는 순전파에서 살아남은 위치(x > 0)에만 gradient를 흘려 보냅니다.
     """
 
     def forward(self, x):
         """
         Args:
-            x: 임의 shape의 입력 배열
+            x: 어떤 shape이든 가능한 입력 배열
 
         Returns:
-            x와 같은 shape. x > 0인 위치만 원래 값을 유지합니다.
+            x와 같은 shape의 배열. 양수는 그대로, 0 이하 값은 0입니다.
         """
-        # TODO: x > 0 위치를 self.mask에 저장하고, 음수/0 위치는 0으로 바꾸세요.
-        raise NotImplementedError("ReLU.forward를 구현하세요.")
+        # mask는 "이 위치로 gradient가 지나갈 수 있는가?"를 기억하는 표입니다.
+        self.mask = x > 0
+        return np.where(self.mask, x, 0)
 
     def backward(self, dout):
         """
         Args:
-            dout: 다음 층에서 넘어온 gradient
+            dout: 뒤쪽 layer에서 전달된 gradient
 
         Returns:
-            ReLU 입력 x에 대한 gradient. forward 때 x <= 0이었던 위치는 0입니다.
+            ReLU 입력 x에 대한 gradient
         """
-        # TODO: forward에서 저장한 self.mask를 이용해 gradient가 흐를 위치만 남기세요.
-        raise NotImplementedError("ReLU.backward를 구현하세요.")
+        # 순전파에서 0으로 막힌 위치는 기울기도 0이 됩니다.
+        return dout * self.mask
 
 
 class Softmax:
     """
-    Softmax 출력층.
+    Softmax output layer.
 
-    각 샘플의 로짓(logit)을 클래스별 확률로 바꿉니다.
-    exp 계산 전에 행별 최댓값을 빼면 큰 숫자에서 overflow가 나는 것을 줄일 수 있습니다.
+    각 샘플의 logit을 클래스별 확률로 바꿉니다.
+    exp를 계산하기 전에 row별 최댓값을 빼면 overflow를 피할 수 있습니다.
     """
 
     def forward(self, x):
         """
         Args:
-            x: (batch_size, num_classes) 로짓
+            x: (batch_size, num_classes) logit 배열
 
         Returns:
-            (batch_size, num_classes) 확률. 각 행의 합은 1입니다.
+            (batch_size, num_classes) 확률 배열. 각 row의 합은 1입니다.
         """
-        # TODO: 수치 안정성을 위해 row별 max를 뺀 뒤 softmax 확률을 계산하세요.
-        # 힌트: np.max(..., axis=1, keepdims=True), np.exp, np.sum을 사용합니다.
-        raise NotImplementedError("Softmax.forward를 구현하세요.")
+        shifted = x - np.max(x, axis=1, keepdims=True)
+        exp_x = np.exp(shifted)
+        self.out = exp_x / np.sum(exp_x, axis=1, keepdims=True)
+        return self.out
 
     def backward(self, dout):
         """
-        Softmax와 Cross Entropy를 함께 미분한 gradient를 train()에서 직접 만들기 때문에
-        여기서는 받은 gradient를 그대로 통과시킵니다.
+        Softmax와 Cross Entropy를 함께 미분하면 gradient가 단순해집니다.
+        train()에서 이미 그 gradient를 만들기 때문에 여기서는 그대로 넘깁니다.
         """
-        # TODO: train()에서 만든 gradient를 그대로 반환하세요.
-        raise NotImplementedError("Softmax.backward를 구현하세요.")
+        return dout

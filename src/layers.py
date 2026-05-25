@@ -1,26 +1,19 @@
 # -*- coding: utf-8 -*-
-"""
-신경망 layer 모음.
-
-학생 구현 대상:
-- Affine.forward, Affine.backward
-- BatchNorm.forward, BatchNorm.backward
-- Dropout.forward, Dropout.backward
-"""
+"""Layer implementations for the NumPy neural network."""
 
 import numpy as np
 
 
 class Affine:
     """
-    완전연결층(Fully Connected Layer).
+    Fully connected layer.
 
-    수식은 y = xW + b 입니다.
-    MNIST에서는 784개 픽셀 입력을 은닉층/출력층 차원으로 선형 변환하는 역할을 합니다.
+    수식은 y = xW + b 입니다. MNIST 이미지 한 장(784차원)을 hidden/output
+    차원으로 선형 변환할 때 사용합니다.
     """
 
     def __init__(self, W, b):
-        """가중치 W와 편향 b를 외부 params dict와 같은 배열 객체로 공유합니다."""
+        # W와 b는 model.params 안의 배열과 같은 객체를 참조합니다.
         self.W = W
         self.b = b
 
@@ -32,31 +25,30 @@ class Affine:
         Returns:
             (batch_size, output_dim)
         """
-        # TODO: backward에서 사용할 입력 x를 저장하고 x @ W + b를 반환하세요.
-        raise NotImplementedError("Affine.forward를 구현하세요.")
+        # backward에서 dW = x.T @ dout을 계산해야 하므로 입력을 저장합니다.
+        self.x = x
+        return x @ self.W + self.b
 
     def backward(self, dout):
         """
         Args:
-            dout: (batch_size, output_dim)
+            dout: (batch_size, output_dim), 뒤쪽 layer에서 온 gradient
 
         Returns:
-            dx: (batch_size, input_dim)
-
-        Side effects:
-            self.dW, self.db에 optimizer가 사용할 gradient를 저장합니다.
+            dx: (batch_size, input_dim), 앞쪽 layer로 보낼 gradient
         """
-        # TODO: self.dW, self.db, dx를 계산하세요.
-        # 힌트: dW = x.T @ dout, db = batch 방향 합, dx = dout @ W.T
-        raise NotImplementedError("Affine.backward를 구현하세요.")
+        self.dW = self.x.T @ dout
+        self.db = np.sum(dout, axis=0)
+        dx = dout @ self.W.T
+        return dx
 
 
 class BatchNorm:
     """
     Batch Normalization.
 
-    미니배치 단위로 각 feature의 평균과 분산을 맞춰 학습을 안정화합니다.
-    train=True일 때는 현재 배치 통계를 쓰고, 추론 때는 누적 running_mean/running_var를 사용합니다.
+    mini-batch 안에서 feature별 평균과 분산을 맞춰 학습을 안정화합니다.
+    학습 중에는 현재 batch 통계를 쓰고, 추론 중에는 running 통계를 씁니다.
     """
 
     def __init__(self, gamma, beta, momentum=0.9):
@@ -64,7 +56,7 @@ class BatchNorm:
         Args:
             gamma: 정규화된 값을 다시 scale하는 학습 파라미터
             beta: 정규화된 값에 더하는 shift 학습 파라미터
-            momentum: running_mean/running_var 이동평균 비율
+            momentum: running_mean/running_var를 부드럽게 갱신하는 비율
         """
         self.gamma = gamma
         self.beta = beta
@@ -77,53 +69,88 @@ class BatchNorm:
         """
         Args:
             x: (batch_size, feature_dim)
-            train: True면 배치 통계, False면 running 통계 사용
+            train: True면 현재 batch 통계, False면 running 통계 사용
 
         Returns:
-            정규화 후 gamma, beta가 적용된 배열
+            x와 같은 shape의 정규화된 출력
         """
-        # TODO: train=True에서는 batch mean/var로 정규화하고 running 통계를 갱신하세요.
-        # TODO: train=False에서는 running_mean/running_var를 사용하세요.
-        raise NotImplementedError("BatchNorm.forward를 구현하세요.")
+        if train:
+            batch_mean = np.mean(x, axis=0)
+            batch_var = np.var(x, axis=0)
+
+            self.x_centered = x - batch_mean
+            self.std = np.sqrt(batch_var + self.eps)
+            self.x_norm = self.x_centered / self.std
+
+            self.running_mean = (
+                self.momentum * self.running_mean + (1 - self.momentum) * batch_mean
+            )
+            self.running_var = (
+                self.momentum * self.running_var + (1 - self.momentum) * batch_var
+            )
+        else:
+            # 추론 때는 batch 하나에 흔들리지 않도록 학습 중 누적한 통계를 씁니다.
+            self.x_centered = x - self.running_mean
+            self.std = np.sqrt(self.running_var + self.eps)
+            self.x_norm = self.x_centered / self.std
+
+        return self.gamma * self.x_norm + self.beta
 
     def backward(self, dout):
         """
         BatchNorm 입력 x, scale gamma, shift beta에 대한 gradient를 계산합니다.
 
         Args:
-            dout: 다음 층에서 넘어온 gradient
+            dout: 뒤쪽 layer에서 온 gradient
 
         Returns:
             dx: BatchNorm 입력 x에 대한 gradient
         """
-        # TODO: self.dbeta, self.dgamma, dx를 계산하세요.
-        # 힌트: 먼저 dbeta와 dgamma shape가 beta/gamma와 같은지 확인합니다.
-        raise NotImplementedError("BatchNorm.backward를 구현하세요.")
+        batch_size = dout.shape[0]
+
+        self.dbeta = np.sum(dout, axis=0)
+        self.dgamma = np.sum(dout * self.x_norm, axis=0)
+
+        dx_norm = dout * self.gamma
+
+        # x_norm = (x - mean) / std 를 한 번에 미분한 compact formula입니다.
+        dx = (
+            (1.0 / batch_size)
+            / self.std
+            * (
+                batch_size * dx_norm
+                - np.sum(dx_norm, axis=0)
+                - self.x_norm * np.sum(dx_norm * self.x_norm, axis=0)
+            )
+        )
+        return dx
 
 
 class Dropout:
     """
     Dropout.
 
-    학습 중 일부 뉴런 출력을 무작위로 0으로 만들어 과적합을 줄입니다.
-    이 구현은 추론 시 출력에 (1 - drop_ratio)를 곱하는 기본 dropout 방식을 사용합니다.
+    학습 중 일부 neuron 출력을 무작위로 0으로 만들어 과적합을 줄입니다.
+    이 구현은 추론 시 출력에 (1 - drop_ratio)를 곱하는 기본 dropout 방식입니다.
     """
 
     def __init__(self, drop_ratio=0.5):
-        """Args: drop_ratio: 학습 중 0으로 만들 뉴런 비율."""
+        """Args: drop_ratio: 학습 중 0으로 만들 neuron 비율"""
         self.drop_ratio = drop_ratio
 
     def forward(self, x, train=True):
         """
         Args:
             x: 입력 배열
-            train: True면 무작위 mask 적용, False면 평균적인 출력 크기로 scale
+            train: True면 random mask 적용, False면 평균 출력 크기로 scale
         """
-        # TODO: train=True에서는 mask를 만들고 x에 곱하세요.
-        # TODO: train=False에서는 x * (1 - drop_ratio)를 반환하세요.
-        raise NotImplementedError("Dropout.forward를 구현하세요.")
+        if train:
+            # True인 위치만 살아남습니다. backward에서도 같은 mask를 사용합니다.
+            self.mask = np.random.rand(*x.shape) > self.drop_ratio
+            return x * self.mask
+
+        return x * (1 - self.drop_ratio)
 
     def backward(self, dout):
-        """forward에서 꺼졌던 뉴런 위치에는 gradient도 흘리지 않습니다."""
-        # TODO: forward에서 만든 mask를 dout에 곱하세요.
-        raise NotImplementedError("Dropout.backward를 구현하세요.")
+        """forward에서 꺼진 neuron 위치에는 gradient도 흐르지 않습니다."""
+        return dout * self.mask
