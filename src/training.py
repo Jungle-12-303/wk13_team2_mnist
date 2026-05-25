@@ -112,6 +112,67 @@ def evaluate(model, x, y):
     return accuracy, total_params
 
 
+def classification_metrics(y_true, y_pred, num_classes=10):
+    """
+    Return multiclass precision, recall, and F1 metrics in percent.
+
+    Macro averages treat all classes equally. Weighted averages scale each
+    class score by its support, which is useful when class counts differ.
+    """
+    confusion = np.zeros((num_classes, num_classes), dtype=np.int64)
+    for true_label, pred_label in zip(y_true, y_pred):
+        confusion[int(true_label), int(pred_label)] += 1
+
+    tp = np.diag(confusion).astype(np.float64)
+    support = confusion.sum(axis=1).astype(np.float64)
+    predicted = confusion.sum(axis=0).astype(np.float64)
+
+    precision = np.divide(tp, predicted, out=np.zeros_like(tp), where=predicted != 0)
+    recall = np.divide(tp, support, out=np.zeros_like(tp), where=support != 0)
+    f1 = np.divide(
+        2 * precision * recall,
+        precision + recall,
+        out=np.zeros_like(tp),
+        where=(precision + recall) != 0,
+    )
+
+    total = support.sum()
+    weights = support / total if total else np.zeros_like(support)
+
+    return {
+        "precision_macro": float(np.mean(precision) * 100),
+        "recall_macro": float(np.mean(recall) * 100),
+        "f1_macro": float(np.mean(f1) * 100),
+        "precision_weighted": float(np.sum(precision * weights) * 100),
+        "recall_weighted": float(np.sum(recall * weights) * 100),
+        "f1_weighted": float(np.sum(f1 * weights) * 100),
+        "per_class_precision": (precision * 100).tolist(),
+        "per_class_recall": (recall * 100).tolist(),
+        "per_class_f1": (f1 * 100).tolist(),
+        "support": support.astype(int).tolist(),
+        "confusion_matrix": confusion.tolist(),
+    }
+
+
+def evaluate_with_metrics(model, x, y, num_classes=10):
+    """
+    Return accuracy, parameter count, predictions, and classification metrics.
+    """
+    logits = model.predict(x)
+    y_pred = np.argmax(logits, axis=1)
+    accuracy = np.mean(y_pred == y) * 100
+    total_params = sum(p.size for p in model.params.values())
+    metrics = classification_metrics(y, y_pred, num_classes=num_classes)
+    metrics.update(
+        {
+            "accuracy": float(accuracy),
+            "params": int(total_params),
+            "y_pred": y_pred,
+        }
+    )
+    return metrics
+
+
 def plot_loss_history(loss_history):
     """Plot one experiment's training loss curve."""
     plt.plot(loss_history)
@@ -367,8 +428,11 @@ def run_experiment(config, x_train, y_train, x_test, y_test):
     )
     time_sec = time.time() - started
 
-    train_acc, params = evaluate(model, x_train, y_train)
-    test_acc, _ = evaluate(model, x_test, y_test)
+    train_eval = evaluate_with_metrics(model, x_train, y_train)
+    test_eval = evaluate_with_metrics(model, x_test, y_test)
+    train_acc = train_eval["accuracy"]
+    test_acc = test_eval["accuracy"]
+    params = test_eval["params"]
 
     result = {
         "name": config.get("name", "experiment"),
@@ -386,6 +450,21 @@ def run_experiment(config, x_train, y_train, x_test, y_test):
         "train_loss": loss_history[-1] if loss_history else None,
         "train_acc": train_acc,
         "test_acc": test_acc,
+        "train_precision_macro": train_eval["precision_macro"],
+        "train_recall_macro": train_eval["recall_macro"],
+        "train_f1_macro": train_eval["f1_macro"],
+        "test_precision_macro": test_eval["precision_macro"],
+        "test_recall_macro": test_eval["recall_macro"],
+        "test_balanced_acc": test_eval["recall_macro"],
+        "test_f1_macro": test_eval["f1_macro"],
+        "test_precision_weighted": test_eval["precision_weighted"],
+        "test_recall_weighted": test_eval["recall_weighted"],
+        "test_f1_weighted": test_eval["f1_weighted"],
+        "test_per_class_precision": test_eval["per_class_precision"],
+        "test_per_class_recall": test_eval["per_class_recall"],
+        "test_per_class_f1": test_eval["per_class_f1"],
+        "test_support": test_eval["support"],
+        "test_confusion_matrix": test_eval["confusion_matrix"],
         "params": params,
         "time_sec": time_sec,
         "loss_history": loss_history,
@@ -411,6 +490,13 @@ def save_results(results, csv_path="results.csv", json_path="results.json"):
         "train_loss",
         "train_acc",
         "test_acc",
+        "test_precision_macro",
+        "test_recall_macro",
+        "test_balanced_acc",
+        "test_f1_macro",
+        "test_precision_weighted",
+        "test_recall_weighted",
+        "test_f1_weighted",
         "params",
         "time_sec",
     ]
@@ -484,6 +570,8 @@ def run_experiments(
         print(
             f"  train_acc={result['train_acc']:.2f}% "
             f"test_acc={result['test_acc']:.2f}% "
+            f"recall={result['test_recall_macro']:.2f}% "
+            f"f1={result['test_f1_macro']:.2f}% "
             f"time={result['time_sec']:.2f}s"
         )
 
