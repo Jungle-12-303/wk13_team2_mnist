@@ -1,96 +1,130 @@
 # -*- coding: utf-8 -*-
-"""Neural network assembly for MNIST classification."""
+"""Configurable NumPy MLP for MNIST classification."""
 
 from collections import OrderedDict
 
 import numpy as np
 
-from activations import ReLU, Softmax
+from activations import get_activation
 from layers import Affine, BatchNorm, Dropout
 from losses import cross_entropy_loss
 
 
-class NeuralNetwork:
+class MLP:
     """
-    MNIST classifier built only with NumPy.
+    Flexible multi-layer perceptron.
 
-    기본 구조는 784 -> 512 -> 256 -> 10 입니다.
-    hidden layer는 Affine -> BatchNorm(optional) -> ReLU -> Dropout(optional)
-    순서로 구성합니다.
+    Hidden layer order:
+        Affine -> BatchNorm(optional) -> Activation -> Dropout(optional)
+
+    Output layer:
+        Affine -> logits
+
+    Softmax and Cross Entropy are handled in losses.py, so forward returns logits.
     """
 
-    def __init__(self, use_batchnorm=True, use_dropout=True, dropout_ratio=0.5):
-        """
-        Args:
-            use_batchnorm: hidden layer마다 BatchNorm을 넣을지 여부
-            use_dropout: hidden layer마다 Dropout을 넣을지 여부
-            dropout_ratio: Dropout에서 끌 neuron 비율
-        """
+    def __init__(
+        self,
+        input_dim=784,
+        hidden_dims=None,
+        output_dim=10,
+        activation="relu",
+        use_batchnorm=True,
+        dropout_rate=0.2,
+        weight_init="he",
+        seed=None,
+        batchnorm_momentum=0.9,
+    ):
+        self.input_dim = input_dim
+        self.hidden_dims = [512, 256] if hidden_dims is None else list(hidden_dims)
+        self.output_dim = output_dim
+        self.activation = activation
         self.use_batchnorm = use_batchnorm
-        self.use_dropout = use_dropout
+        self.dropout_rate = dropout_rate
+        self.weight_init = weight_init
+        self.seed = seed
+        self.batchnorm_momentum = batchnorm_momentum
+
+        if seed is not None:
+            np.random.seed(seed)
+
         self.params = {}
         self.grads = {}
-
-        layer_sizes = [784, 512, 256, 10]
-
-        # ReLU와 잘 맞는 He initialization입니다.
-        # 입력 차원이 클수록 작은 값으로 시작해 activation 폭주를 줄입니다.
-        for idx in range(1, len(layer_sizes)):
-            input_dim = layer_sizes[idx - 1]
-            output_dim = layer_sizes[idx]
-            # np.random.randn(input_dim, output_dim)
-            # - 입력: 만들 배열의 shape
-            # - 처리: 평균 0, 표준편차 1인 정규분포 난수를 생성
-            # - 출력: (input_dim, output_dim) weight 배열
-            #
-            # np.sqrt(2.0 / input_dim)
-            # - 입력: 숫자 하나
-            # - 처리: 제곱근을 계산
-            # - 출력: weight scale로 쓸 scalar
-            self.params[f"W{idx}"] = (
-                np.random.randn(input_dim, output_dim) * np.sqrt(2.0 / input_dim)
-            )
-            # np.zeros(output_dim)
-            # - 입력: 만들 배열 길이
-            # - 처리: 모든 값이 0인 배열 생성
-            # - 출력: (output_dim,) bias 배열
-            self.params[f"b{idx}"] = np.zeros(output_dim)
-
-            if self.use_batchnorm and idx < len(layer_sizes) - 1:
-                # np.ones(output_dim)은 모든 값이 1인 (output_dim,) 배열을 만듭니다.
-                # BatchNorm의 gamma는 처음에 값을 그대로 통과시키기 위해 1로 둡니다.
-                self.params[f"gamma{idx}"] = np.ones(output_dim)
-                # beta는 처음에 shift를 주지 않기 위해 0으로 둡니다.
-                self.params[f"beta{idx}"] = np.zeros(output_dim)
-
         self.layers = OrderedDict()
-        for idx in range(1, len(layer_sizes)):
+        self.layer_dims = [input_dim] + self.hidden_dims + [output_dim]
+        self.activation_names = self._normalize_activations(activation)
+
+        self._init_params()
+        self._build_layers()
+        self.grads = {key: np.zeros_like(value) for key, value in self.params.items()}
+
+    def _normalize_activations(self, activation):
+        """Allow one activation string or one activation per hidden layer."""
+        if isinstance(activation, str):
+            return [activation] * len(self.hidden_dims)
+
+        activation_names = list(activation)
+        if len(activation_names) != len(self.hidden_dims):
+            raise ValueError("activation list length must match hidden_dims length.")
+        return activation_names
+
+    def _weight_scale(self, fan_in, fan_out):
+        """Return std scale for the selected initialization strategy."""
+        init = self.weight_init.lower()
+        if init == "he":
+            return np.sqrt(2.0 / fan_in)
+        if init == "xavier":
+            return np.sqrt(2.0 / (fan_in + fan_out))
+        if init == "normal_small":
+            return 0.01
+        if init == "normal_large":
+            return 1.0
+        raise ValueError(f"Unknown weight_init: {self.weight_init}")
+
+    def _init_params(self):
+        """Create W/b for every Affine layer and gamma/beta for BatchNorm layers."""
+        for idx in range(1, len(self.layer_dims)):
+            fan_in = self.layer_dims[idx - 1]
+            fan_out = self.layer_dims[idx]
+            scale = self._weight_scale(fan_in, fan_out)
+
+            self.params[f"W{idx}"] = np.random.randn(fan_in, fan_out) * scale
+            self.params[f"b{idx}"] = np.zeros(fan_out)
+
+            is_hidden = idx < len(self.layer_dims) - 1
+            if is_hidden and self.use_batchnorm:
+                self.params[f"gamma{idx}"] = np.ones(fan_out)
+                self.params[f"beta{idx}"] = np.zeros(fan_out)
+
+    def _build_layers(self):
+        """Build OrderedDict so forward/backward order is explicit and reproducible."""
+        for idx in range(1, len(self.layer_dims)):
             self.layers[f"Affine{idx}"] = Affine(
                 self.params[f"W{idx}"], self.params[f"b{idx}"]
             )
 
-            is_hidden_layer = idx < len(layer_sizes) - 1
-            if is_hidden_layer:
-                if self.use_batchnorm:
-                    self.layers[f"BatchNorm{idx}"] = BatchNorm(
-                        self.params[f"gamma{idx}"], self.params[f"beta{idx}"]
-                    )
-                self.layers[f"ReLU{idx}"] = ReLU()
-                if self.use_dropout:
-                    self.layers[f"Dropout{idx}"] = Dropout(dropout_ratio)
+            is_hidden = idx < len(self.layer_dims) - 1
+            if not is_hidden:
+                continue
 
-        self.softmax = Softmax()
-        # np.zeros_like(value)는 각 파라미터와 같은 shape의 gradient 저장 공간을 만듭니다.
-        self.grads = {key: np.zeros_like(value) for key, value in self.params.items()}
+            if self.use_batchnorm:
+                self.layers[f"BatchNorm{idx}"] = BatchNorm(
+                    self.params[f"gamma{idx}"],
+                    self.params[f"beta{idx}"],
+                    momentum=self.batchnorm_momentum,
+                )
+            self.layers[f"Activation{idx}"] = get_activation(self.activation_names[idx - 1])
+            if self.dropout_rate > 0.0:
+                self.layers[f"Dropout{idx}"] = Dropout(self.dropout_rate)
 
     def forward(self, x, train=True):
         """
         Args:
-            x: (batch_size, 784) normalized MNIST images
-            train: BatchNorm/Dropout 학습 모드 여부
+            x: (batch_size, input_dim)
+            train: BatchNorm/Dropout mode flag
 
         Returns:
-            (batch_size, 10) class probabilities
+            (batch_size, output_dim) logits
         """
         out = x
         for layer in self.layers.values():
@@ -98,17 +132,10 @@ class NeuralNetwork:
                 out = layer.forward(out, train=train)
             else:
                 out = layer.forward(out)
-        return self.softmax.forward(out)
+        return out
 
     def backward(self, dout):
-        """
-        Run backpropagation through the whole network and fill self.grads.
-
-        Args:
-            dout: Softmax + CrossEntropy를 합친 출력층 gradient
-        """
-        dout = self.softmax.backward(dout)
-
+        """Run backpropagation and collect gradients into self.grads."""
         for layer in reversed(list(self.layers.values())):
             dout = layer.backward(dout)
 
@@ -122,11 +149,37 @@ class NeuralNetwork:
                 self.grads[f"gamma{idx}"] = layer.dgamma
                 self.grads[f"beta{idx}"] = layer.dbeta
 
+        return dout
+
     def loss(self, x, y):
-        """Return the cross entropy loss for the current model prediction."""
-        y_pred = self.forward(x, train=True)
-        return cross_entropy_loss(y_pred, y)
+        """Return cross entropy loss from logits."""
+        logits = self.forward(x, train=True)
+        return cross_entropy_loss(logits, y)
 
     def predict(self, x):
-        """Predict probabilities in inference mode."""
+        """Return logits in inference mode. argmax(logits) is the predicted class."""
         return self.forward(x, train=False)
+
+    @property
+    def architecture(self):
+        """Human-readable architecture string such as 784-256-128-10."""
+        return "-".join(str(dim) for dim in self.layer_dims)
+
+
+class NeuralNetwork(MLP):
+    """
+    Backward-compatible wrapper for older code/tests.
+
+    The old default structure was 784 -> 512 -> 256 -> 10.
+    """
+
+    def __init__(self, use_batchnorm=True, use_dropout=True, dropout_ratio=0.5):
+        super().__init__(
+            input_dim=784,
+            hidden_dims=[512, 256],
+            output_dim=10,
+            activation="relu",
+            use_batchnorm=use_batchnorm,
+            dropout_rate=dropout_ratio if use_dropout else 0.0,
+            weight_init="he",
+        )

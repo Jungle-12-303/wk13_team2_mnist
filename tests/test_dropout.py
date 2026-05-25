@@ -17,8 +17,8 @@ class TestDropout:
         assert out.shape == x.shape
 
     def test_dropout_forward_inference_scale(self):
-        """추론 모드 Dropout.forward()가 평균 출력 크기에 맞게 scale하는지 확인한다."""
+        """추론 모드 Dropout.forward()에서는 Dropout이 비활성화되어 입력을 그대로 반환한다."""
         drop = Dropout(drop_ratio=0.5)
         x = np.ones((2, 2))
         out = drop.forward(x, train=False)
-        np.testing.assert_array_almost_equal(out, 0.5 * x)
+        np.testing.assert_array_almost_equal(out, x)

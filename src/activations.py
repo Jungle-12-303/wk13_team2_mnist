@@ -8,119 +8,161 @@ class ReLU:
     """
     ReLU(Rectified Linear Unit).
 
-    입력값이 0보다 크면 그대로 통과시키고, 0 이하이면 0으로 바꿉니다.
-    역전파 때는 순전파에서 살아남은 위치(x > 0)에만 gradient를 흘려 보냅니다.
+    0보다 큰 값은 그대로 통과시키고, 0 이하 값은 0으로 바꿉니다.
+    ReLU 계열은 보통 He initialization과 잘 맞습니다.
     """
 
     def forward(self, x):
         """
         Args:
-            x: 어떤 shape이든 가능한 입력 배열
+            x: any-shaped NumPy array
 
         Returns:
-            x와 같은 shape의 배열. 양수는 그대로, 0 이하 값은 0입니다.
+            x와 같은 shape의 배열. x <= 0인 위치는 0입니다.
         """
         # x > 0은 x와 같은 shape의 bool 배열을 만듭니다.
-        # 예: [[-1, 2]] -> [[False, True]]
-        # mask는 "이 위치로 gradient가 지나갈 수 있는가?"를 기억하는 표입니다.
+        # np.where(condition, a, b)는 True 위치에는 a, False 위치에는 b를 넣습니다.
         self.mask = x > 0
-        # np.where(condition, a, b)
-        # - condition: bool 배열
-        # - a: condition이 True인 위치에 넣을 값
-        # - b: condition이 False인 위치에 넣을 값
-        # - 출력: condition과 같은 shape의 배열
         return np.where(self.mask, x, 0)
 
     def backward(self, dout):
+        """Forward에서 0으로 막힌 위치에는 gradient도 흐르지 않습니다."""
+        return dout * self.mask
+
+
+class LeakyReLU:
+    """
+    Leaky ReLU.
+
+    ReLU와 비슷하지만 x <= 0에서도 alpha만큼 작은 기울기를 남깁니다.
+    음수 구간 gradient가 완전히 죽는 문제를 줄일 때 사용합니다.
+    """
+
+    def __init__(self, alpha=0.01):
+        self.alpha = alpha
+
+    def forward(self, x):
         """
         Args:
-            dout: 뒤쪽 layer에서 전달된 gradient
+            x: any-shaped NumPy array
 
         Returns:
-            ReLU 입력 x에 대한 gradient
+            x > 0이면 x, x <= 0이면 alpha * x를 담은 배열
         """
-        # 순전파에서 0으로 막힌 위치는 기울기도 0이 됩니다.
-        return dout * self.mask
+        self.mask = x > 0
+        # np.where(condition, a, b)
+        # - 입력: bool 배열 condition, 선택할 값 a/b
+        # - 처리: condition 위치별로 a 또는 b를 고릅니다.
+        # - 출력: condition과 같은 shape의 배열
+        return np.where(self.mask, x, self.alpha * x)
+
+    def backward(self, dout):
+        """양수 구간은 1, 음수 구간은 alpha만큼 gradient를 흘립니다."""
+        dx = np.where(self.mask, 1.0, self.alpha)
+        return dout * dx
 
 
 class Sigmoid:
     """
     Sigmoid activation function.
 
-    입력값을 0과 1 사이의 값으로 바꿉니다.
+    입력값을 0과 1 사이로 바꿉니다.
     수식은 sigmoid(x) = 1 / (1 + exp(-x)) 입니다.
-
-    값이 아주 작으면 0에 가까워지고, 아주 크면 1에 가까워집니다.
-    이진 분류나 "켜짐/꺼짐" 같은 확률 느낌의 값을 만들 때 자주 등장합니다.
     """
 
     def forward(self, x):
         """
         Args:
-            x: 어떤 shape이든 가능한 입력 배열
+            x: any-shaped NumPy array
 
         Returns:
-            x와 같은 shape의 배열. 모든 값은 0보다 크고 1보다 작습니다.
+            x와 같은 shape의 배열. 모든 값은 0~1 범위입니다.
         """
-        # np.exp(-x)
-        # - 입력: x와 같은 shape의 배열
-        # - 처리: 각 원소에 자연상수 e의 거듭제곱을 적용합니다.
-        #         여기서는 -x를 넣으므로 exp(-x)를 계산합니다.
-        # - 출력: x와 같은 shape의 양수 배열
-        #
-        # 1 / (1 + exp(-x))는 NumPy broadcasting으로 모든 원소에 각각 적용됩니다.
-        self.out = 1 / (1 + np.exp(-x))
+        # overflow 방지를 위해 x >= 0과 x < 0을 나누어 계산합니다.
+        # np.empty_like(x)는 x와 같은 shape/dtype의 빈 배열을 만듭니다.
+        out = np.empty_like(x, dtype=np.float64)
+        positive = x >= 0
+
+        # np.exp(z)
+        # - 입력: 배열 z
+        # - 처리: 각 원소에 e의 거듭제곱을 적용합니다.
+        # - 출력: 입력과 같은 shape의 양수 배열
+        out[positive] = 1 / (1 + np.exp(-x[positive]))
+        exp_x = np.exp(x[~positive])
+        out[~positive] = exp_x / (1 + exp_x)
+
+        self.out = out
         return self.out
 
     def backward(self, dout):
+        """Sigmoid 미분값은 sigmoid(x) * (1 - sigmoid(x))입니다."""
+        return dout * self.out * (1 - self.out)
+
+
+class Tanh:
+    """
+    Hyperbolic tangent activation.
+
+    입력값을 -1과 1 사이로 바꿉니다.
+    Sigmoid보다 0을 중심으로 출력이 퍼져서 hidden layer에서 자주 사용됩니다.
+    """
+
+    def forward(self, x):
         """
         Args:
-            dout: 뒤쪽 layer에서 전달된 gradient
+            x: any-shaped NumPy array
 
         Returns:
-            Sigmoid 입력 x에 대한 gradient
+            x와 같은 shape의 배열. 모든 값은 -1~1 범위입니다.
         """
-        # Sigmoid의 미분값은 sigmoid(x) * (1 - sigmoid(x))입니다.
-        # forward에서 self.out에 sigmoid(x)를 저장했으므로 다시 계산할 필요가 없습니다.
-        return dout * self.out * (1 - self.out)
+        # np.tanh(x)
+        # - 입력: 배열 x
+        # - 처리: 각 원소에 tanh 함수를 적용합니다.
+        # - 출력: 입력과 같은 shape의 배열
+        self.out = np.tanh(x)
+        return self.out
+
+    def backward(self, dout):
+        """Tanh 미분값은 1 - tanh(x)^2입니다."""
+        return dout * (1 - self.out**2)
 
 
 class Softmax:
     """
-    Softmax output layer.
+    Softmax output helper.
 
-    각 샘플의 logit을 클래스별 확률로 바꿉니다.
-    exp를 계산하기 전에 row별 최댓값을 빼면 overflow를 피할 수 있습니다.
+    logits를 class probability로 바꿉니다. loss.py에서도 같은 안정화 공식을 사용합니다.
     """
 
     def forward(self, x):
         """
         Args:
-            x: (batch_size, num_classes) logit 배열
+            x: (batch_size, num_classes) logits
 
         Returns:
-            (batch_size, num_classes) 확률 배열. 각 row의 합은 1입니다.
+            (batch_size, num_classes) probabilities. 각 row의 합은 1입니다.
         """
-        # np.max(x, axis=1, keepdims=True)
-        # - 입력: (batch_size, num_classes) 배열 x
-        # - 처리: 각 row(샘플)에서 가장 큰 logit을 찾음
-        # - 출력: keepdims=True라서 (batch_size, 1) shape 유지
+        # np.max(..., axis=1, keepdims=True)는 row별 최댓값을 (batch_size, 1)로 돌려줍니다.
+        # 이 값을 빼면 exp 계산에서 overflow가 나는 것을 막을 수 있습니다.
         shifted = x - np.max(x, axis=1, keepdims=True)
-        # np.exp(shifted)
-        # - 입력: shifted와 같은 shape의 배열
-        # - 처리: 각 원소에 자연상수 e의 거듭제곱을 적용
-        # - 출력: shifted와 같은 shape의 양수 배열
         exp_x = np.exp(shifted)
-        # np.sum(exp_x, axis=1, keepdims=True)
-        # - 입력: (batch_size, num_classes) 배열
-        # - 처리: 각 row의 클래스 점수 합계를 구함
-        # - 출력: (batch_size, 1) 배열. 나누기 때 row별로 broadcast됩니다.
         self.out = exp_x / np.sum(exp_x, axis=1, keepdims=True)
         return self.out
 
     def backward(self, dout):
-        """
-        Softmax와 Cross Entropy를 함께 미분하면 gradient가 단순해집니다.
-        train()에서 이미 그 gradient를 만들기 때문에 여기서는 그대로 넘깁니다.
-        """
+        """Softmax + Cross Entropy gradient는 loss 쪽에서 만들어 그대로 통과시킵니다."""
         return dout
+
+
+def get_activation(name):
+    """Return an activation layer instance from a string name."""
+    normalized = name.lower()
+    if normalized == "relu":
+        return ReLU()
+    if normalized == "leaky_relu":
+        return LeakyReLU()
+    if normalized == "sigmoid":
+        return Sigmoid()
+    if normalized == "tanh":
+        return Tanh()
+    raise ValueError(f"Unknown activation: {name}")
