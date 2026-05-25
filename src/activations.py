@@ -43,6 +43,48 @@ class ReLU:
         return dout * self.mask
 
 
+class Sigmoid:
+    """
+    Sigmoid activation function.
+
+    입력값을 0과 1 사이의 값으로 바꿉니다.
+    수식은 sigmoid(x) = 1 / (1 + exp(-x)) 입니다.
+
+    값이 아주 작으면 0에 가까워지고, 아주 크면 1에 가까워집니다.
+    이진 분류나 "켜짐/꺼짐" 같은 확률 느낌의 값을 만들 때 자주 등장합니다.
+    """
+
+    def forward(self, x):
+        """
+        Args:
+            x: 어떤 shape이든 가능한 입력 배열
+
+        Returns:
+            x와 같은 shape의 배열. 모든 값은 0보다 크고 1보다 작습니다.
+        """
+        # np.exp(-x)
+        # - 입력: x와 같은 shape의 배열
+        # - 처리: 각 원소에 자연상수 e의 거듭제곱을 적용합니다.
+        #         여기서는 -x를 넣으므로 exp(-x)를 계산합니다.
+        # - 출력: x와 같은 shape의 양수 배열
+        #
+        # 1 / (1 + exp(-x))는 NumPy broadcasting으로 모든 원소에 각각 적용됩니다.
+        self.out = 1 / (1 + np.exp(-x))
+        return self.out
+
+    def backward(self, dout):
+        """
+        Args:
+            dout: 뒤쪽 layer에서 전달된 gradient
+
+        Returns:
+            Sigmoid 입력 x에 대한 gradient
+        """
+        # Sigmoid의 미분값은 sigmoid(x) * (1 - sigmoid(x))입니다.
+        # forward에서 self.out에 sigmoid(x)를 저장했으므로 다시 계산할 필요가 없습니다.
+        return dout * self.out * (1 - self.out)
+
+
 class Softmax:
     """
     Softmax output layer.
