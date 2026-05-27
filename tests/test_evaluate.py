@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from network import NeuralNetwork
-from training import evaluate
+from training import classification_metrics, evaluate
 
 
 class TestEvaluate:
@@ -22,3 +22,15 @@ class TestEvaluate:
         acc, n_params = evaluate(model, x, y)
         assert 0 <= acc <= 100
         assert n_params > 0
+
+    def test_classification_metrics_returns_macro_scores(self):
+        """classification_metrics() should return multiclass precision/recall/F1."""
+        y_true = np.array([0, 0, 1, 1])
+        y_pred = np.array([0, 1, 1, 1])
+
+        metrics = classification_metrics(y_true, y_pred, num_classes=2)
+
+        assert metrics["precision_macro"] == pytest.approx(83.3333333333)
+        assert metrics["recall_macro"] == pytest.approx(75.0)
+        assert metrics["f1_macro"] == pytest.approx(73.3333333333)
+        assert metrics["confusion_matrix"] == [[1, 1], [0, 2]]
